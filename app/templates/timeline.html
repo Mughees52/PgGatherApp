@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Timeline — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Timeline</h1><div class="sub">Continuous monitoring history from lightweight collection</div></div>
+</div>
+
+{% if servers %}
+<div class="cardgrid">
+  {% for s in servers %}
+  <a class="card clickable" href="/timeline/{{ s.server_key }}?hours=24" style="text-decoration:none;color:inherit">
+    <div class="rc-top">
+      <div class="rc-host">{{ s.host }}</div>
+      {% if s.pg %}<span class="chip-pg">PG {{ s.pg }}</span>{% endif %}
+    </div>
+    {% if s.db %}<div class="rc-db">{{ s.db }}</div>{% endif %}
+    <div class="rc-meta">
+      <span>{{ s.samples }} samples</span>
+      <span>{{ s.first | relative_time }} — {{ s.last | relative_time }}</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  No continuous collection history yet.<br>
+  Enable monitoring on a connection via <a href="/connections">Connections</a> (click the ⏱ button).
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>revealOnScroll();</script>{% endblock %}

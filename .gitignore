@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.claude/
+
+# runtime data
+.env
+.env.*
+storage/
+app.db
+app.db-*
+*.key
+tests/fixtures/*.tsv
+tests/fixtures/*.tsv.gz
+tests/fixtures/*.html

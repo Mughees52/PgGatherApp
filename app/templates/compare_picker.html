@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Compare — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Compare Reports</h1><div class="sub">Pick two snapshots of the same server to see configuration drift</div></div>
+</div>
+
+{% if groups %}
+{% for key, reports in groups.items() %}
+<section class="card reveal">
+  <div class="card-h">
+    <h2>{{ reports[0].srvr_host or reports[0].system_id or key }}</h2>
+    <span class="chip-pg">{{ reports | length }} snapshots</span>
+  </div>
+  <form class="compare-form" data-server="{{ key }}">
+    <table class="grid">
+      <thead><tr><th>A</th><th>B</th><th>Collected</th><th>PG</th><th>Source</th></tr></thead>
+      <tbody>
+      {% for r in reports %}
+        <tr>
+          <td><input type="radio" name="a" value="{{ r.id }}"></td>
+          <td><input type="radio" name="b" value="{{ r.id }}"></td>
+          <td>{{ (r.collected_at or r.created_at) | relative_time }}</td>
+          <td>{% if r.pg_version_num %}<span class="chip-pg">{{ r.pg_version_num | pg_version_badge }}</span>{% else %}—{% endif %}</td>
+          <td class="muted small">{{ r.source }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="actions" style="margin-top:12px">
+      <button class="btn primary" type="submit">Compare selected</button>
+      <span class="muted small">Select one report in column A and one in column B</span>
+    </div>
+  </form>
+</section>
+{% endfor %}
+
+{% if singles %}
+<section class="card" style="margin-top:24px">
+  <h2>Servers with only one snapshot</h2>
+  <p class="muted small">These servers need at least one more collection to enable comparison.</p>
+  <table class="grid">
+    <thead><tr><th>Server</th><th>Collected</th><th>PG</th></tr></thead>
+    <tbody>
+    {% for r in singles %}
+    <tr>
+      <td>{{ r.srvr_host or r.system_id or r.original_filename or r.id[:8] }}</td>
+      <td>{{ (r.collected_at or r.created_at) | relative_time }}</td>
+      <td>{{ r.pg_version_num or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% else %}
+<div class="empty">No server has two or more completed reports yet. Collect another snapshot of the same database to compare.</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>revealOnScroll();</script>{% endblock %}

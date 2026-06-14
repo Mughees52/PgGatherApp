@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+pydantic-settings
+beautifulsoup4
+cryptography
+mcp
+
+# dev / test
+pytest
+httpx

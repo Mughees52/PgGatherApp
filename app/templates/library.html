@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Library — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Report Library</h1>
+    <div class="sub">Stored PostgreSQL diagnostics snapshots</div>
+  </div>
+  <div class="actions">
+    <a class="btn primary" href="/connections">＋ Collect from database</a>
+    <a class="btn" href="/reports/upload">↑ Upload TSV</a>
+  </div>
+</div>
+
+{% if not docker.daemon_running %}
+<div class="alert warn"><span>⚠</span> Docker is not running — collection and report generation are paused until you start Docker.</div>
+{% endif %}
+
+<div class="statbar">
+  <div class="stat"><div class="n">{{ stats.total }}</div><div class="l">Reports stored</div></div>
+  <div class="stat"><div class="n">{{ stats.servers }}</div><div class="l">Servers tracked</div></div>
+  <div class="stat"><div class="n text">{{ stats.latest | relative_time if stats.latest else "—" }}</div><div class="l">Latest collection</div></div>
+</div>
+
+<form class="toolbar" method="get" action="/reports">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search host, version, system id, notes…">
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for s in ["queued","collecting","generating","done","failed"] %}
+    <option value="{{ s }}" {% if active_status==s %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Filter</button>
+  {% if q or active_status or active_tag %}<a class="btn ghost" href="/reports">Clear</a>{% endif %}
+</form>
+
+{% if tags %}
+<div class="tag-row" style="margin-bottom:18px">
+  {% for t in tags %}<a class="chip {% if active_tag==t %}on{% endif %}" href="/reports?tag={{ t }}">{{ t }}</a>{% endfor %}
+</div>
+{% endif %}
+
+{% if reports %}
+<div class="cardgrid">
+  {% for r in reports %}
+  <div class="card report-card reveal" onclick="location.href='/reports/{{ r.id }}'" style="cursor:pointer">
+    <div class="rc-top">
+      <div>
+        <div class="rc-host">{{ r.srvr_host or r.system_id or r.original_filename or r.id[:8] }}</div>
+        {% if r.srvr_db %}<div class="rc-db">{{ r.srvr_db }}</div>{% endif %}
+      </div>
+      <span class="badge {{ r.status | status_badge }}">{{ r.status }}</span>
+    </div>
+    <div class="rc-meta">
+      {% if r.pg_version_num %}<span class="chip-pg">{{ r.pg_version_num | pg_version_badge }}</span>{% endif %}
+      <span>{{ (r.collected_at or r.created_at) | relative_time }}</span>
+      <span class="src" title="{{ r.source }}">{{ "⛁ collected" if r.source=="collected" else "↑ uploaded" }}</span>
+    </div>
+    {% set rtags = tags_by_report.get(r.id, []) %}
+    {% if rtags %}<div class="tag-row">{% for t in rtags %}<span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}
+    <div class="rc-actions" onclick="event.stopPropagation()">
+      <a class="btn sm" href="/reports/{{ r.id }}">Open</a>
+      {% if r.status == "done" %}<a class="btn sm" href="/reports/{{ r.id }}/view" target="_blank">Raw ↗</a>{% endif %}
+      <form method="post" action="/reports/{{ r.id }}/delete" onsubmit="return confirm('Delete this report?')">
+        <button class="btn sm danger" type="submit">Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No reports yet. <a href="/connections">Connect to a database</a> to collect your first one.</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>revealOnScroll();</script>{% endblock %}

@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+{% block title %}{{ report.srvr_host or "Report" }} — PgGatherApp{% endblock %}
+{% block content %}
+
+<div class="hero">
+  <div>
+    <div class="h-title">
+      <h1>{{ report.srvr_host or report.system_id or report.original_filename or report.id[:8] }}</h1>
+      {% if report.pg_version_num %}<span class="chip-pg">{{ report.pg_version_num | pg_version_badge }}</span>{% endif %}
+      <span class="badge {{ report.status | status_badge }}" id="status-badge">{{ report.status }}</span>
+    </div>
+    <div class="h-meta">
+      {% if report.srvr_db %}<span>db <b>{{ report.srvr_db }}</b></span>{% endif %}
+      <span>collected <b>{{ (report.collected_at or report.created_at) | relative_time }}</b></span>
+      {% if report.system_id %}<span>system id <b class="mono">{{ report.system_id }}</b></span>{% endif %}
+      <span>source <b>{{ report.source }}</b></span>
+    </div>
+  </div>
+  <div class="actions">
+    {% if report.stored_html_path %}<a class="btn" href="/reports/{{ report.id }}/download/html">↓ HTML</a>{% endif %}
+    {% if report.stored_tsv_path %}<a class="btn" href="/reports/{{ report.id }}/download/tsv">↓ TSV</a>{% endif %}
+    {% if report.stored_html_path %}<a class="btn" href="/reports/{{ report.id }}/view" target="_blank">Raw report ↗</a>{% endif %}
+    {% if report.status == "failed" %}<form method="post" action="/reports/{{ report.id }}/retry"><button class="btn" type="submit">Retry</button></form>{% endif %}
+    <form method="post" action="/reports/{{ report.id }}/delete" onsubmit="return confirm('Delete this report?')"><button class="btn danger" type="submit">Delete</button></form>
+  </div>
+</div>
+
+{% if view %}
+<!-- Health overview metric cards -->
+<div class="metrics">
+  {% for m in view.metrics %}
+  <div class="metric tone-{{ m.tone }} reveal" {% if m.tip %}title="{{ m.tip }}"{% endif %}>
+    <div class="m-label">{{ m.label }}</div>
+    <div class="m-value">{{ m.value }}</div>
+    <div class="m-unit">{{ m.unit }}</div>
+    {% if m.sub %}<div class="m-sub">
+      {% for s in m.sub %}<div {% if s.tone %}title="{{ s.tip if s.tip is defined and s.tip else '' }}"{% endif %}><span>{{ s.k }}</span><span class="{{ 'w' if s.tone=='warn' }}{{ 'b' if s.tone=='bad' }}">{{ s.v }}</span></div>{% endfor %}
+    </div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="detail-cols">
+  <!-- Side panel (tags, notes, snapshot info) -->
+  <aside class="side-panel">
+    <section class="card">
+      <h2>Tags</h2>
+      <form method="post" action="/reports/{{ report.id }}/tags">
+        <input name="tags" value="{{ tags | join(', ') }}" placeholder="prod, primary, eu-west">
+        <button class="btn sm" type="submit" style="margin-top:8px">Save tags</button>
+      </form>
+      {% if comparable %}
+      <h2 style="margin-top:18px">Compare with</h2>
+      <ul class="links">
+        {% for c in comparable %}<li><a href="/compare/{{ report.id }}/{{ c.id }}">{{ (c.collected_at or c.created_at) | relative_time }}</a></li>{% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+    <section class="card">
+      <h2>Notes</h2>
+      <form method="post" action="/reports/{{ report.id }}/notes">
+        <textarea name="notes" rows="3" placeholder="Why this snapshot was taken…">{{ report.notes or "" }}</textarea>
+        <button class="btn sm" type="submit" style="margin-top:8px">Save notes</button>
+      </form>
+      <h2 style="margin-top:18px">Snapshot details</h2>
+      <table class="kv">
+        <tr><td>PostgreSQL</td><td>{{ report.pg_version or "—" }}</td></tr>
+        <tr><td>Server</td><td>{{ report.srvr_host or "—" }}{% if report.srvr_port %}:{{ report.srvr_port }}{% endif %}</td></tr>
+        <tr><td>Engine</td><td>v{{ report.engine_ver or "?" }}</td></tr>
+        <tr><td>TSV size</td><td>{{ report.tsv_size_bytes | format_bytes }}</td></tr>
+        <tr><td>Report size</td><td>{{ report.html_size_bytes | format_bytes }}</td></tr>
+      </table>
+    </section>
+  </aside>
+
+  <div class="main-col">
+    <!-- Findings -->
+    <section class="card reveal">
+      <div class="card-h"><h2>Findings</h2></div>
+      <div class="findings">
+        {% for f in view.findings %}
+        <div class="finding sev-{{ f.sev }}">
+          <span class="f-ic">{{ {"red":"✖","amber":"▲","blue":"ℹ","ok":"✓"}[f.sev] }}</span>
+          <div><div class="f-title">{{ f.title }}</div><div class="f-detail">{{ f.detail }}{% if f.doc %} <a href="{{ f.doc }}" target="_blank" class="small">Details ↗</a>{% endif %}</div></div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Sessions -->
+    {% if view.sessions %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Sessions</h2></div>
+      {% set total = view.sessions | sum(attribute='v') %}
+      <div class="stacked">
+        {% for s in view.sessions %}<div class="seg {{ s.cls }}" style="flex:{{ s.v }}" title="{{ s.k }}: {{ s.v }}">{{ s.v if (s.v / total) > 0.08 else "" }}</div>{% endfor %}
+      </div>
+      <div class="legend">
+        {% for s in view.sessions %}<span><i class="{{ s.cls }}"></i>{{ s.k }} · {{ s.v }}</span>{% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Database overview -->
+    <section class="card reveal">
+      <div class="card-h"><h2>Database Overview</h2></div>
+      <div class="kv-grid">
+        <div class="kv-item"><div class="k">Database</div><div class="v" title="The database this report was collected from">{{ view.db.db_name or "—" }}</div></div>
+        <div class="kv-item"><div class="k">Role</div><div class="v" title="{{ 'Server is in standby/recovery mode — read-only replica' if view.db.in_recovery else 'Server is the primary — handles reads and writes' }}">{{ "Standby" if view.db.in_recovery else "Primary" }}</div></div>
+        <div class="kv-item"><div class="k">Schemas</div><div class="v" title="Number of schemas in this database (excluding system schemas)">{{ view.db.schemas }}</div></div>
+        <div class="kv-item"><div class="k">Partitioned</div><div class="v" title="Number of natively partitioned tables using declarative partitioning">{{ view.db.partitioned }}</div></div>
+        <div class="kv-item"><div class="k">Unlogged</div><div class="v" title="Unlogged tables are faster but not crash-safe — data is lost on crash or failover">{{ view.db.unlogged }}</div></div>
+        <div class="kv-item"><div class="k">Stats age</div><div class="v" title="Days since pg_stat_user_tables statistics were last reset. Longer periods give more reliable per-day averages">{{ view.db.days_since_reset }}d</div></div>
+      </div>
+    </section>
+
+    {% if view.detail %}
+    {% set d = view.detail %}
+
+    <!-- Head info / Server -->
+    {% if d.head_info %}
+    {% set hi = d.head_info %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Server Info</h2></div>
+      <div class="kv-grid">
+        <div class="kv-item"><div class="k">PostgreSQL</div><div class="v small" title="Full PostgreSQL server version string including build details">{{ hi.pg_version or "—" }}</div></div>
+        <div class="kv-item"><div class="k">Started</div><div class="v" title="When the PostgreSQL server was last started">{{ hi.started | relative_time if hi.started else "—" }}</div></div>
+        <div class="kv-item"><div class="k">Uptime</div><div class="v" title="Time since the last server start. Short uptime may indicate recent crashes or restarts">{{ hi.uptime }}</div></div>
+        <div class="kv-item"><div class="k">Role</div><div class="v" title="{{ 'Server is in standby/recovery mode' if hi.recovery else 'Server is the primary instance' }}">{{ "Standby" if hi.recovery else "Primary" }}</div></div>
+        <div class="kv-item"><div class="k">Timeline</div><div class="v" title="WAL timeline ID. Each failover/recovery increments this. Timeline > 1 means at least one failover has occurred">{{ hi.timeline or "—" }}</div></div>
+        <div class="kv-item"><div class="k">Current WAL</div><div class="v mono small" title="Current Write-Ahead Log position. Used to calculate replication lag and WAL generation rate">{{ hi.current_wal or "—" }}</div></div>
+        <div class="kv-item"><div class="k">Last Reload</div><div class="v" title="When pg_reload_conf() was last called or SIGHUP was sent. If this is more recent than server start, config was reloaded">{{ hi.reload_ts | relative_time if hi.reload_ts else "—" }}</div></div>
+        <div class="kv-item"><div class="k">Binary Dir</div><div class="v mono small" title="Location of PostgreSQL binaries. Non-standard paths may indicate custom builds">{{ hi.bindir or "—" }}</div></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Databases -->
+    {% if d.databases %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Databases · {{ d.databases | length }}</h2><button class="btn sm toggle-section" data-target="sec-dbs">▸</button></div>
+      <div class="section-body" id="sec-dbs">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th>Database</th><th title="Total database size on disk">Size</th><th title="Buffer cache hit ratio — higher is better, below 95% is concerning">Cache Hit</th><th title="Transaction ID age — risk of wraparound when exceeding autovacuum_freeze_max_age">Age</th><th title="Average transactions committed per day">Commits/day</th><th title="Total transaction rollbacks — high numbers indicate application errors">Rollbacks</th><th title="Temporary files created for sorts/hashes exceeding work_mem">Temp Files</th><th>Encoding</th></tr></thead>
+          <tbody>
+          {% for db in d.databases %}
+          <tr>
+            <td class="tab-name" title="{{ db.tip }}" data-copy="{{ db.tip }}"><strong>{{ db.name }}</strong></td>
+            <td>{{ db.size }}</td>
+            <td class="{{ 'warn-cell' if db.cache_warn }}" {% if db.cache_warn %}title="Cache hit ratio below 95%. Database is reading too much from disk. Consider increasing shared_buffers"{% endif %}>{{ db.cache_hit }}</td>
+            <td class="{{ 'warn-cell' if db.age_warn }}" {% if db.age_warn %}title="Database age exceeds 200M transactions. Risk of wraparound. Ensure autovacuum is running aggressively"{% endif %}>{{ db.age }}</td>
+            <td>{{ db.commits_day }}</td>
+            <td>{{ db.rollbacks }}</td>
+            <td>{{ db.temp_files }}{% if db.temp_bytes != "—" %} ({{ db.temp_bytes }}){% endif %}</td>
+            <td class="muted">{{ db.encoding }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Connections by database -->
+    {% if d.connections_by_db %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Connections by Database</h2></div>
+      <div class="table-scroll"><table class="grid detail-tbl">
+        <thead><tr><th>Database</th><th title="Currently executing a query">Active</th><th title="In a transaction but not executing — holds locks">Idle Txn</th><th title="Connected but not in a transaction">Idle</th><th title="Total client connections">Total</th><th title="Connections using SSL encryption">SSL</th><th title="Unencrypted connections — security risk">Non-SSL</th></tr></thead>
+        <tbody>
+        {% for c in d.connections_by_db %}
+        <tr>
+          <td class="tab-name" title="{{ c.tip }}" data-copy="{{ c.tip }}"><strong>{{ c.database }}</strong></td>
+          <td>{{ c.active }}</td>
+          <td class="{{ 'warn-cell' if c.idle_in_txn > 0 }}" {% if c.idle_in_txn > 0 %}title="Idle-in-transaction sessions hold locks and prevent cleanup"{% endif %}>{{ c.idle_in_txn }}</td>
+          <td>{{ c.idle }}</td>
+          <td>{{ c.total }}</td>
+          <td>{{ c.ssl }}</td>
+          <td class="{{ 'warn-cell' if c.ssl_warn }}" {% if c.ssl_warn %}title="Large percentage of unencrypted connections. Enable SSL for security"{% endif %}>{{ c.non_ssl }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    {% endif %}
+
+    <!-- Tables -->
+    {% if d.tables %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Tables · {{ d.tables | length }}</h2><button class="btn sm toggle-section" data-target="sec-tabs">▸</button></div>
+      <div class="section-body collapsed" id="sec-tabs">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th>Table Name</th><th title="Number of live rows">Live</th><th title="Dead rows / Dead-Live ratio">Dead</th><th title="Estimated bloat percentage">Bloat</th><th title="Table + Index total size">Size</th><th title="Buffer cache hit ratio">Cache Hit</th><th title="Transaction ID age">Age</th><th>Last Vac</th><th>Last Analyze</th><th title="Total indexes (unused)">Idx</th><th title="Has primary key">PK</th></tr></thead>
+          <tbody>
+          {% for t in d.tables %}
+          <tr>
+            <td class="tab-name" title="{{ t.tip }}" data-copy="{{ t.tip }}"><strong>{{ t.name }}</strong> <span class="muted small">{{ t.schema }}</span>{% if t.large %} <span class="blue-cell">●</span>{% endif %}{% if t.idx_bloated %} <span class="warn-cell">idx⚠</span>{% endif %}</td>
+            <td>{{ t.live_tup }}</td>
+            <td class="{{ 'warn-cell' if t.dead_warn }}" {% if t.dead_warn %}title="Dead/live ratio > 10%. High dead tuples indicate vacuum is not keeping up. Run VACUUM or check autovacuum settings"{% endif %}>{{ t.dead_tup }} <span class="muted small">{{ t.dead_ratio }}</span></td>
+            <td class="{{ 'bad-cell' if t.bloat_bad else 'warn-cell' if t.bloat_warn }}" {% if t.bloat_warn %}title="Table bloat > 20%. Wasted disk space and slower sequential scans. Consider running VACUUM FULL or pg_repack"{% endif %}>{{ t.bloat_pct }}</td>
+            <td>{{ t.total_size }}</td>
+            <td class="{{ 'warn-cell' if t.cache_warn }}" {% if t.cache_warn %}title="Cache hit ratio below 90%. This table is reading heavily from disk. Consider increasing shared_buffers or reducing table size"{% endif %}>{{ t.cache_hit }}</td>
+            <td class="{{ 'warn-cell' if t.age_warn }}" {% if t.age_warn %}title="Transaction ID age exceeds 200M. Risk of wraparound. Ensure autovacuum is running and check autovacuum_freeze_max_age"{% endif %}>{{ t.age }}</td>
+            <td class="muted small" {% if t.last_vac == None %}title="This table has never been vacuumed. Dead tuples are accumulating"{% endif %}>{{ (t.last_vac or "never") | relative_time }}</td>
+            <td class="muted small" {% if t.last_anlyze == None %}title="This table has never been analyzed. Query planner may choose poor execution plans"{% endif %}>{{ (t.last_anlyze or "never") | relative_time }}</td>
+            <td>{{ t.idx_count }}{% if t.idx_unused %} <span class="warn-cell" title="These unused indexes consume disk space and slow down writes. Consider dropping them">({{ t.idx_unused }} unused)</span>{% endif %}</td>
+            <td {% if not t.has_pk %}title="No primary key. This complicates logical replication and row identification"{% endif %}>{{ "✓" if t.has_pk else "✗" }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Partitioned tables -->
+    {% if d.partitioned_tables %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Partitioned Tables · {{ d.partitioned_tables | length }}</h2></div>
+      <div class="table-scroll"><table class="grid detail-tbl">
+        <thead><tr><th>Table</th><th title="Native-Declarative or Inheritance">Type</th><th title="Number of partitions">Partitions</th><th title="Combined size of all partitions">Total Size</th><th title="Table + index size">Tab+Ind</th><th title="Partition pruning effectiveness — higher is better">Prune %</th></tr></thead>
+        <tbody>
+        {% for pt in d.partitioned_tables %}
+        <tr class="{{ 'row-warn' if pt.part_warn }}">
+          <td class="tab-name" title="{{ pt.tip }}" data-copy="{{ pt.tip }}"><strong>{{ pt.name }}</strong></td>
+          <td>{{ pt.type }}</td>
+          <td {% if pt.part_warn %}title="No partitions found for this partitioned table"{% endif %}>{{ pt.partitions }}</td>
+          <td>{{ pt.total_size }}</td>
+          <td>{{ pt.tab_ind_size }}</td>
+          <td>{{ pt.prune_pct }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    {% endif %}
+
+    <!-- Indexes -->
+    {% if d.indexes %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Indexes · {{ d.indexes | length }}</h2><button class="btn sm toggle-section" data-target="sec-idx">▸</button></div>
+      <div class="section-body collapsed" id="sec-idx">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th>Index Name</th><th>Table</th><th title="Number of index scans">Scans</th><th title="Index size on disk">Size</th><th title="Buffer cache hit ratio for this index">Cache Hit</th><th>PK</th><th>Unique</th><th>Valid</th></tr></thead>
+          <tbody>
+          {% for ix in d.indexes %}
+          <tr class="{{ 'row-bad' if ix.invalid else 'row-warn' if ix.unused }}" {% if ix.invalid %}title="Invalid index — not used by the planner. Recreate with REINDEX or drop it"{% elif ix.unused %}title="Unused index — zero scans since stats reset. Wastes {{ ix.size }} disk and slows writes. Consider dropping"{% endif %}>
+            <td><strong>{{ ix.name }}</strong></td>
+            <td class="muted">{{ ix.schema }}.{{ ix.table }}</td>
+            <td class="{{ 'warn-cell' if ix.unused }}" {% if ix.unused %}title="Zero index scans. This index is not being used by any query"{% endif %}>{{ ix.scans }}</td>
+            <td {% if ix.large %}title="Index exceeds 2GB. Large indexes increase maintenance overhead"{% endif %}>{{ ix.size }}</td>
+            <td class="{{ 'warn-cell' if ix.cache_warn }}" {% if ix.cache_warn %}title="Cache hit ratio below 50%. Index reads are mostly going to disk"{% endif %}>{{ ix.cache_hit }}</td>
+            <td>{{ "✓" if ix.primary else "" }}</td>
+            <td>{{ "✓" if ix.unique else "" }}</td>
+            <td class="{{ 'bad-cell' if ix.invalid }}" {% if ix.invalid %}title="INVALID — this index is broken and must be recreated"{% endif %}>{{ "✓" if ix.valid else "✗ invalid" }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Session detail -->
+    {% if d.sessions %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Session Detail · {{ d.sessions | length }}</h2><button class="btn sm toggle-section" data-target="sec-sess">▸</button></div>
+      <div class="section-body collapsed" id="sec-sess">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th title="Process ID of the backend">PID</th><th title="Current session state">State</th><th title="Type of backend process">Backend</th><th title="Current wait event type and name">Wait</th><th title="Client IP address">Client</th><th title="Application name set by the client">App</th><th title="Last or current SQL query (truncated)">Query</th><th title="Lock blocking status">Blocked</th></tr></thead>
+          <tbody>
+          {% for s in d.sessions %}
+          <tr class="{{ 'row-bad' if s.is_blocked else 'row-warn' if s.xmin_warn }}" {% if s.is_blocked %}title="This session is blocked by another session holding a conflicting lock"{% elif s.xmin_warn %}title="Transaction ID age > 20. Long-running transactions prevent cleanup of dead rows and can cause wraparound issues"{% endif %}>
+            <td class="mono tab-name" title="{{ s.tip }}" data-copy="{{ s.tip }}">{{ s.pid }}</td>
+            <td><span class="badge-sm {{ s.state_cls }}" {% if s.state == 'idle in transaction' %}title="Idle in transaction — holding locks and blocking vacuum. Application should commit or rollback promptly"{% endif %}>{{ s.state }}</span></td>
+            <td class="muted small">{{ s.backend_type }}</td>
+            <td class="mono small">{{ s.wait }}</td>
+            <td class="mono small">{{ s.client }}</td>
+            <td class="muted small">{{ s.app }}</td>
+            <td class="mono small query-cell" title="Click to expand / double-click to copy" data-full="{{ s.query }}" data-copy="{{ s.query }}" onclick="expandQuery(this)">{{ s.query[:100] }}{% if s.query|length > 100 %}…{% endif %}</td>
+            <td>{% if s.is_blocked %}<span class="bad-cell" title="Victim — blocked by PIDs: {{ s.blocked_by }}">blocked</span>{% elif s.xmin_warn %}<span class="warn-cell" title="Old xmin is preventing dead row cleanup">xid age</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Top statements -->
+    {% if d.statements %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Top Statements · {{ d.statements | length }}</h2><button class="btn sm toggle-section" data-target="sec-stmt">▸</button></div>
+      <div class="section-body collapsed" id="sec-stmt">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th>Query</th><th title="Percentage of total database time">DB Time</th><th title="Total execution count">Calls</th><th title="Average execution time">Avg Time</th><th title="Shared buffer cache hit ratio">Cache Hit</th><th title="Average blocks read per call">Avg Reads</th><th title="Average temp blocks read per call">Temp</th></tr></thead>
+          <tbody>
+          {% for st in d.statements %}
+          <tr class="{{ 'row-warn' if st.high_impact }}" {% if st.high_impact %}title="High-impact statement — consider optimizing this query"{% endif %}>
+            <td class="mono small query-cell" title="Click to expand / double-click to copy" data-full="{{ st.query }}" data-copy="{{ st.query }}" onclick="expandQuery(this)">{{ st.query[:100] }}{% if st.query|length > 100 %}…{% endif %}</td>
+            <td><strong>{{ st.pct_db_time }}</strong></td>
+            <td>{{ st.calls }}</td>
+            <td class="{{ 'bad-cell' if st.avg_time_warn else 'warn-cell' if st.avg_time_slow }}" {% if st.avg_time_warn %}title="Avg execution time > 60s. This is a very slow query — optimize urgently"{% elif st.avg_time_slow %}title="Avg execution time > 10s. Consider query optimization"{% endif %}>{{ st.avg_time }}</td>
+            <td class="{{ 'warn-cell' if st.cache_warn }}" {% if st.cache_warn %}title="Cache hit ratio below 50%. Query is reading heavily from disk. Check if needed indexes exist"{% endif %}>{{ st.cache_hit }}</td>
+            <td class="{{ 'warn-cell' if st.avg_reads_warn }}" {% if st.avg_reads_warn %}title="Avg block reads > 12,800 per call. Heavy I/O per execution — optimize the query or add indexes"{% endif %}>{{ st.avg_reads }}</td>
+            <td class="{{ 'warn-cell' if st.has_temp }}" {% if st.has_temp %}title="Query is using temp files. Increase work_mem or optimize the query to reduce sort/hash sizes"{% endif %}>{{ st.avg_temp_reads if st.has_temp else "—" }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Wait events -->
+    {% if d.wait_events and d.wait_events.events %}
+    {% set we = d.wait_events %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Wait Events / Database Time</h2><button class="btn sm toggle-section" data-target="sec-waits">▸</button></div>
+      <div class="section-body collapsed" id="sec-waits">
+        {% if we.cpu_estimate %}<p class="muted small">Estimated CPU usage: ~{{ we.cpu_estimate }} core equivalents</p>{% endif %}
+        <!-- Category breakdown -->
+        {% if we.categories %}
+        <h3 style="margin-bottom:10px">By Category</h3>
+        <div class="stacked" style="margin-bottom:16px">
+          {% for c in we.categories %}
+          <div class="seg seg-cat" style="flex:{{ c.count }}; background:var(--cat-{{ loop.index0 % 8 }})" title="{{ c.category }}: {{ c.pct }}%">{{ c.category[:6] if (c.count / we.total) > 0.08 else "" }}</div>
+          {% endfor %}
+        </div>
+        <div class="legend" style="margin-bottom:16px">
+          {% for c in we.categories %}<span><i style="background:var(--cat-{{ loop.index0 % 8 }})"></i>{{ c.category }} · {{ c.pct }}%</span>{% endfor %}
+        </div>
+        {% endif %}
+        <!-- Per-event bars -->
+        <h3 style="margin-bottom:10px">By Event</h3>
+        {% for w in we.events %}
+        <div class="wait-row">
+          <span class="wait-name">{{ w.event }} <span class="muted small">({{ w.category }})</span></span>
+          <div class="wait-bar-wrap"><div class="wait-bar" style="width:{{ w.pct }}%"></div></div>
+          <span class="wait-pct mono">{{ w.pct }}%</span>
+          <span class="muted small">({{ w.count }})</span>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Checkpoints / BGWriter -->
+    {% if d.bgwriter %}
+    {% set bg = d.bgwriter %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Checkpoints &amp; Background Writer</h2></div>
+      <div class="kv-grid">
+        <div class="kv-item"><div class="k">Timed CPs</div><div class="v" title="Checkpoints triggered by checkpoint_timeout. These are normal scheduled checkpoints">{{ bg.cp_timed }}</div></div>
+        <div class="kv-item"><div class="k">Requested CPs</div><div class="v" title="Checkpoints forced by WAL volume exceeding max_wal_size. High numbers mean max_wal_size is too low">{{ bg.cp_req }}</div></div>
+        <div class="kv-item"><div class="k">Forced %</div><div class="v {{ 'warn-cell' if bg.forced_warn }}" title="{{ bg.forced_tip or 'Percentage of checkpoints triggered by WAL volume rather than timeout. Ideally below 10%' }}">{{ bg.forced_pct }}</div></div>
+        <div class="kv-item"><div class="k">Avg CP interval</div><div class="v {{ 'warn-cell' if bg.interval_warn }}" title="{{ bg.interval_tip or 'Average minutes between checkpoints. Longer intervals reduce I/O overhead but increase recovery time' }}">{{ bg.avg_interval }}</div></div>
+        <div class="kv-item"><div class="k">Avg CP write time</div><div class="v" title="Average time spent writing dirty buffers during each checkpoint. Spread over checkpoint_completion_target">{{ bg.write_time }}</div></div>
+        <div class="kv-item"><div class="k">Avg CP sync time</div><div class="v {{ 'warn-cell' if bg.sync_warn }}" title="{{ bg.sync_tip or 'Average time spent on fsync during each checkpoint. High values indicate slow storage' }}">{{ bg.sync_time }}</div></div>
+        <div class="kv-item"><div class="k">MB / checkpoint</div><div class="v" title="Average megabytes of dirty data written per checkpoint. Higher values mean more I/O per checkpoint">{{ bg.mb_per_cp }}</div></div>
+        <div class="kv-item"><div class="k">Clean by CP</div><div class="v {{ 'warn-cell' if bg.cp_pct_warn }}" title="{{ bg.cp_pct_tip or 'Dirty buffers flushed by the checkpointer process' }}">{{ bg.buf_checkpoint }} <span class="muted small">({{ bg.cp_pct }})</span></div></div>
+        <div class="kv-item"><div class="k">Clean by BGWriter</div><div class="v" title="Dirty buffers cleaned by the background writer. Ideally bgwriter should handle most cleaning to avoid backend stalls">{{ bg.buf_clean }} <span class="muted small">({{ bg.clean_pct }})</span></div></div>
+        <div class="kv-item"><div class="k">Clean by backends</div><div class="v {{ 'warn-cell' if bg.backend_warn }}" title="{{ bg.backend_tip or 'Dirty buffers written by session backends. High values mean backends are stalling to write pages — increase shared_buffers or tune bgwriter' }}">{{ bg.buf_backend }} <span class="muted small">({{ bg.backend_pct }})</span></div></div>
+        <div class="kv-item"><div class="k">Buffers allocated</div><div class="v" title="Total new buffers allocated in shared_buffers. High allocation rate relative to shared_buffers size indicates buffer churn">{{ bg.buf_alloc }}</div></div>
+        {% if bg.stats_reset %}<div class="kv-item"><div class="k">Stats since</div><div class="v" title="When pg_stat_bgwriter was last reset. Longer periods give more reliable averages">{{ bg.stats_reset | relative_time }}</div></div>{% endif %}
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Replication -->
+    {% if d.replication %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Replication · {{ d.replication | length }}</h2></div>
+      <div class="table-scroll"><table class="grid detail-tbl">
+        <thead><tr><th>User</th><th>Client</th><th title="Replication connection state">State</th><th title="Synchronous replication mode">Sync</th><th title="Bytes not yet sent to replica">Sent Lag</th><th title="Bytes sent but not yet written to disk on replica">Write Lag</th><th title="Bytes written but not yet flushed on replica">Flush Lag</th><th title="Bytes flushed but not yet replayed on replica">Replay Lag</th><th title="Associated replication slot name">Slot</th></tr></thead>
+        <tbody>
+        {% for rp in d.replication %}
+        <tr>
+          <td>{{ rp.user }}</td>
+          <td class="mono small">{{ rp.client }}</td>
+          <td>{{ rp.state }}</td>
+          <td>{{ rp.sync }}</td>
+          <td>{{ rp.sent_lag }}</td>
+          <td>{{ rp.write_lag }}</td>
+          <td>{{ rp.flush_lag }}</td>
+          <td>{{ rp.replay_lag }}</td>
+          <td class="muted">{{ rp.slot }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    {% endif %}
+
+    <!-- IO Statistics -->
+    {% if d.io_stats %}
+    <section class="card reveal">
+      <div class="card-h"><h2>IO Statistics</h2><button class="btn sm toggle-section" data-target="sec-io">▸</button></div>
+      <div class="section-body collapsed" id="sec-io">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th title="Type of backend process performing I/O">Backend Type</th><th title="Number of read operations">Reads</th><th title="Total bytes read from disk">Read Bytes</th><th title="Number of write operations to OS buffer">Writes</th><th title="Total bytes written to OS buffer">Write Bytes</th><th title="Shared buffer cache hits — data found in memory">Hits</th><th title="Buffers evicted to make room — high values indicate memory pressure">Evictions</th><th title="Number of fsync calls to flush data to persistent storage">Fsyncs</th></tr></thead>
+          <tbody>
+          {% for io in d.io_stats %}
+          <tr>
+            <td><strong>{{ io.backend }}</strong></td>
+            <td>{{ io.reads }}</td>
+            <td>{{ io.read_bytes }}</td>
+            <td>{{ io.writes }}</td>
+            <td>{{ io.write_bytes }}</td>
+            <td>{{ io.hits }}</td>
+            <td>{{ io.evictions }}</td>
+            <td>{{ io.fsyncs }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- HBA rules -->
+    {% if d.hba %}
+    <section class="card reveal">
+      <div class="card-h"><h2>HBA Rules · {{ d.hba | length }}</h2><button class="btn sm toggle-section" data-target="sec-hba">▸</button></div>
+      <div class="section-body collapsed" id="sec-hba">
+        <div class="table-scroll"><table class="grid detail-tbl">
+          <thead><tr><th>#</th><th>Type</th><th>Database</th><th>User</th><th>Address</th><th>Method</th><th>Error</th><th>Shadow</th></tr></thead>
+          <tbody>
+          {% for h in d.hba %}
+          <tr class="{{ 'row-bad' if h.error else 'row-warn' if h.is_shadowed or h.method_warn }}">
+            <td class="muted">{{ h.seq }}</td>
+            <td>{{ h.type }}</td>
+            <td>{{ h.database }}</td>
+            <td>{{ h.user }}</td>
+            <td class="mono small {{ 'warn-cell' if h.addr_warn }}" {% if h.addr_warn %}title="Allowing connections from all addresses is a security risk. Restrict to specific subnets"{% endif %}>{{ h.address }}</td>
+            <td class="{{ 'warn-cell' if h.method_warn }}" {% if h.method == 'trust' %}title="trust authentication allows connections without a password. Never use for remote connections"{% elif h.method == 'password' %}title="password sends credentials in cleartext. Use scram-sha-256 instead"{% elif h.method == 'md5' %}title="MD5 authentication is weak. Switch to scram-sha-256 for better security"{% endif %}>{{ h.method }}</td>
+            <td class="{{ 'bad-cell' if h.error }}" {% if h.error %}title="This HBA rule has a configuration error and may not work as intended"{% endif %}>{{ h.error or "" }}</td>
+            <td class="{{ 'warn-cell' if h.is_shadowed }}" {% if h.is_shadowed %}title="This rule will never match because rule #{{ h.shadowed_by }} already covers the same scope. Remove or reorder"{% endif %}>{{ "shadowed by #" + h.shadowed_by if h.is_shadowed else "" }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+    {% endif %}
+
+    <!-- Extensions -->
+    {% if d.extensions %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Extensions · {{ d.extensions | length }}</h2></div>
+      <div class="table-scroll"><table class="grid detail-tbl">
+        <thead><tr><th title="Installed extension name">Extension</th><th>Version</th><th title="Schema where extension objects are installed">Schema</th><th>Owner</th></tr></thead>
+        <tbody>
+        {% for ex in d.extensions %}
+        <tr class="{{ 'row-warn' if ex.risky }}">
+          <td><strong>{{ ex.name }}</strong>{% if ex.risky %} <span class="warn-cell" title="Risky extension — may cause issues in mission-critical systems. Evaluate carefully">⚠</span>{% endif %}</td>
+          <td>{{ ex.version }}</td>
+          <td class="muted">{{ ex.schema }}</td>
+          <td class="muted">{{ ex.owner }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    {% endif %}
+
+    <!-- Roles -->
+    {% if d.roles %}
+    <section class="card reveal">
+      <div class="card-h"><h2>Roles · {{ d.roles | length }}</h2></div>
+      <div class="table-scroll"><table class="grid detail-tbl">
+        <thead><tr><th>Role</th><th title="Superuser — unrestricted access, minimize these">Super</th><th title="Can initiate streaming replication">Replication</th><th title="Password authentication method — SCRAM is strongest">Auth</th><th title="Currently active sessions for this role">Active</th><th title="Sessions idle in transaction — holding locks">Idle Txn</th><th title="Total connections for this role">Total</th><th title="Maximum allowed connections (-1 = unlimited)">Limit</th></tr></thead>
+        <tbody>
+        {% for ro in d.roles %}
+        <tr>
+          <td class="tab-name" title="{{ ro.tip }}" data-copy="{{ ro.tip }}"><strong>{{ ro.name }}</strong></td>
+          <td {% if ro.superuser %}title="Superuser — has unrestricted access. Minimize superuser accounts for security"{% endif %}>{{ "✓" if ro.superuser else "" }}</td>
+          <td>{{ "✓" if ro.replication else "" }}</td>
+          <td class="{{ 'warn-cell' if ro.auth_warn }}" {% if ro.auth_warn %}title="MD5 authentication is weak. Switch to SCRAM-SHA-256 for better password security"{% endif %}>{{ ro.auth }}</td>
+          <td>{{ ro.active }}</td>
+          <td class="{{ 'warn-cell' if ro.idle_in_txn > 0 }}" {% if ro.idle_in_txn > 0 %}title="Sessions idle in transaction hold locks and block vacuum"{% endif %}>{{ ro.idle_in_txn }}</td>
+          <td>{{ ro.total }}</td>
+          <td class="muted">{{ ro.conn_limit if ro.conn_limit >= 0 else "∞" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    {% endif %}
+
+    {% endif %}{# end detail sections #}
+
+    <!-- Parameter Recommendations -->
+    <section class="card reveal">
+      <div class="card-h"><h2>Parameter Recommendations</h2></div>
+      <p class="muted small">Provide your server specs to receive tuning recommendations based on this report's configuration.</p>
+      <div class="rec-form" id="rec-form">
+        <div class="rec-inputs">
+          <label>CPUs <input type="number" id="rec-cpus" value="4" min="1" max="512"></label>
+          <label>Memory (GB) <input type="number" id="rec-mem" value="8" min="1" max="16384"></label>
+          <label>Storage <select id="rec-strg"><option value="ssd">SSD / NVMe</option><option value="san">SAN</option><option value="mag">Magnetic</option></select></label>
+          <label>Workload <select id="rec-wrkld"><option value="oltp">OLTP</option><option value="olap">OLAP / DSS</option><option value="mixed">Mixed</option></select></label>
+          <label>Filesystem <select id="rec-flsys"><option value="rglr">Regular (ext4/xfs)</option><option value="cow">CoW (ZFS/Btrfs)</option></select></label>
+        </div>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn primary" type="button" id="rec-calc" data-rid="{{ report.id }}">Calculate</button>
+          <button class="btn" type="button" id="rec-copy" style="display:none">Copy recommendations</button>
+        </div>
+      </div>
+      <div id="rec-results" style="margin-top:16px"></div>
+    </section>
+
+    <!-- Configuration parameters -->
+    <section class="card reveal">
+      <div class="card-h"><h2>Configuration · {{ view.param_count }} parameters</h2><button class="btn sm toggle-section" data-target="sec-params">▸</button></div>
+      <div class="section-body collapsed" id="sec-params">
+        <div class="param-toolbar"><input type="search" id="param-search" placeholder="Filter parameters…"></div>
+        <div id="param-list">
+          {% for g in view.param_groups %}
+          <div class="param-group">
+            <h3>{{ g.name }} <span class="count">{{ g.params | length }}</span></h3>
+            <table class="grid params">
+              <tbody>
+              {% for p in g.params %}
+              <tr class="{{ 'overridden' if p.overridden }}" data-name="{{ p.name }}" {% if p.overridden %}title="Non-default value — this parameter has been tuned from its PostgreSQL default"{% endif %}>
+                <td class="pname mono">{{ p.name }}</td>
+                <td class="pval mono">{{ p.setting if p.setting != "" else "''" }}</td>
+              </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+{% elif report.status == "done" %}
+<!-- Fallback: native view unavailable, show raw report -->
+<div class="alert warn"><span>ℹ</span> Detailed view unavailable for this report — showing the raw generated report.</div>
+<section class="card report-frame">
+  <iframe src="/reports/{{ report.id }}/view" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+</section>
+
+{% elif report.status == "failed" %}
+<section class="card"><h2>Error</h2>{% if report.error %}<p class="err">{{ report.error }}</p>{% endif %}<h2 style="margin-top:14px">Log</h2><pre class="log">{{ log }}</pre></section>
+
+{% else %}
+<section class="card" id="progress">
+  <h2>Working…</h2>
+  <p class="muted">This page refreshes automatically. Collection takes ~20s+ by design.</p>
+  <pre class="log">{{ log }}</pre>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>revealOnScroll(); setupParamSearch(); setupSectionToggles(); setupTableSort();</script>
+{% if report.status in ["queued","collecting","generating"] %}<script>pollStatus("{{ report.id }}");</script>{% endif %}
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Compare — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Configuration Diff</h1><div class="sub">What changed between two snapshots of the same server</div></div></div>
+
+<div class="compare-head">
+  <div class="card col-a">
+    <div class="muted small">A · OLDER</div>
+    <h3>{{ (a.collected_at or a.created_at) | relative_time }}</h3>
+    <div class="muted small">{{ a.pg_version_num | pg_version_badge }} · <a href="/reports/{{ a.id }}">open report</a></div>
+  </div>
+  <div class="card col-b">
+    <div class="muted small">B · NEWER</div>
+    <h3>{{ (b.collected_at or b.created_at) | relative_time }}</h3>
+    <div class="muted small">{{ b.pg_version_num | pg_version_badge }} · <a href="/reports/{{ b.id }}">open report</a></div>
+  </div>
+</div>
+
+<div class="diffstats">
+  <div class="ds changed"><div class="n">{{ changed }}</div><div class="l muted small">CHANGED</div></div>
+  <div class="ds added"><div class="n">{{ added }}</div><div class="l muted small">ADDED</div></div>
+  <div class="ds removed"><div class="n">{{ removed }}</div><div class="l muted small">REMOVED</div></div>
+</div>
+
+{% if metrics %}
+<div class="card">
+  <div class="card-h"><h2>Server Metrics</h2></div>
+  <table class="grid diff">
+    <thead><tr><th>Metric</th><th>A (older)</th><th>B (newer)</th></tr></thead>
+    <tbody>
+    {% for m in metrics %}
+      <tr class="diff-{{ m.state }}">
+        <td>{{ m.label }}</td>
+        <td class="mono {% if m.state=='changed' %}was{% endif %}">{{ m.a }}</td>
+        <td class="mono {% if m.state=='changed' %}now{% endif %}">{{ m.b }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-h">
+    <h2>Parameters</h2>
+    <label class="inline small"><input type="checkbox" id="only-changed" checked> only differences</label>
+  </div>
+  {% if rows %}
+  <table class="grid diff">
+    <thead><tr><th>Parameter</th><th>A (older)</th><th>B (newer)</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="diff-{{ r.state }}" {% if r.state == "same" %}data-same="1"{% endif %}>
+        <td class="mono">{{ r.name }}</td>
+        <td class="mono {% if r.state=='removed' %}was{% endif %}">{{ r.a if r.a is not none else "—" }}</td>
+        <td class="mono {% if r.state=='changed' or r.state=='added' %}now{% endif %}">{{ r.b if r.b is not none else "—" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty">No configuration data captured for these reports.</div>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>setupDiffFilter();</script>{% endblock %}

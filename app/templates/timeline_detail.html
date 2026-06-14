@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Timeline · {{ server_key[:12] }} — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Server Timeline</h1><div class="sub">{{ server_key }}</div></div>
+  <div class="actions">
+    <a class="btn {{ 'primary' if hours==1 }}" href="/timeline/{{ server_key }}?hours=1">1h</a>
+    <a class="btn {{ 'primary' if hours==6 }}" href="/timeline/{{ server_key }}?hours=6">6h</a>
+    <a class="btn {{ 'primary' if hours==24 }}" href="/timeline/{{ server_key }}?hours=24">24h</a>
+    <a class="btn {{ 'primary' if hours==168 }}" href="/timeline/{{ server_key }}?hours=168">7d</a>
+    <a class="btn {{ 'primary' if hours==720 }}" href="/timeline/{{ server_key }}?hours=720">30d</a>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-h"><h2>Sessions</h2></div>
+  <canvas id="chart-sessions" height="200"></canvas>
+</section>
+
+<section class="card" style="margin-top:18px">
+  <div class="card-h"><h2>Wait Events (Top 10)</h2></div>
+  <canvas id="chart-waits" height="200"></canvas>
+</section>
+
+<section class="card" style="margin-top:18px">
+  <div class="card-h"><h2>Connections</h2></div>
+  <canvas id="chart-connections" height="160"></canvas>
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+(async () => {
+  const res = await fetch(`/timeline/{{ server_key }}/data?hours={{ hours }}`);
+  const data = await res.json();
+
+  // --- Sessions chart ---
+  const sessCtx = document.getElementById("chart-sessions").getContext("2d");
+  const sessLabels = data.sessions.map(s => s.collected_at.slice(11, 16));
+  new Chart(sessCtx, {
+    type: "line",
+    data: {
+      labels: sessLabels,
+      datasets: [
+        { label: "Active", data: data.sessions.map(s => s.active), borderColor: "#059669", backgroundColor: "rgba(5,150,105,.1)", fill: true, tension: 0.3 },
+        { label: "Idle in Txn", data: data.sessions.map(s => s.idle_in_txn), borderColor: "#d97706", backgroundColor: "rgba(217,119,6,.1)", fill: true, tension: 0.3 },
+        { label: "Idle", data: data.sessions.map(s => s.idle), borderColor: "#94a3b8", backgroundColor: "rgba(148,163,184,.1)", fill: true, tension: 0.3 },
+        { label: "Total", data: data.sessions.map(s => s.total), borderColor: "#1A5276", borderDash: [5,3], fill: false, tension: 0.3 },
+      ]
+    },
+    options: { responsive: true, interaction: { mode: "index", intersect: false },
+      scales: { y: { beginAtZero: true } }, plugins: { legend: { position: "bottom" } } }
+  });
+
+  // --- Wait events chart ---
+  const waitCtx = document.getElementById("chart-waits").getContext("2d");
+  const waitTimestamps = Object.keys(data.wait_events).sort();
+  // Find top 10 events by total count
+  const eventTotals = {};
+  for (const ts of waitTimestamps) {
+    for (const [ev, cnt] of Object.entries(data.wait_events[ts])) {
+      eventTotals[ev] = (eventTotals[ev] || 0) + cnt;
+    }
+  }
+  const topEvents = Object.entries(eventTotals).sort((a, b) => b[1] - a[1]).slice(0, 10).map(e => e[0]);
+  const colors = ["#059669","#d97706","#2980B9","#dc2626","#7c3aed","#0891b2","#be185d","#94a3b8","#ea580c","#4f46e5"];
+  const waitDatasets = topEvents.map((ev, i) => ({
+    label: ev, borderColor: colors[i % colors.length],
+    data: waitTimestamps.map(ts => data.wait_events[ts]?.[ev] || 0),
+    fill: false, tension: 0.3, pointRadius: 0,
+  }));
+  new Chart(waitCtx, {
+    type: "line",
+    data: { labels: waitTimestamps.map(t => t.slice(11, 16)), datasets: waitDatasets },
+    options: { responsive: true, interaction: { mode: "index", intersect: false },
+      scales: { y: { beginAtZero: true, stacked: false } }, plugins: { legend: { position: "bottom" } } }
+  });
+
+  // --- Connections chart ---
+  const connCtx = document.getElementById("chart-connections").getContext("2d");
+  new Chart(connCtx, {
+    type: "line",
+    data: {
+      labels: data.connections.map(c => c.collected_at.slice(11, 16)),
+      datasets: [
+        { label: "Total", data: data.connections.map(c => c.total), borderColor: "#1A5276", fill: false, tension: 0.3 },
+        { label: "SSL", data: data.connections.map(c => c.ssl), borderColor: "#059669", fill: false, tension: 0.3 },
+        { label: "Non-SSL", data: data.connections.map(c => c.non_ssl), borderColor: "#dc2626", fill: false, tension: 0.3 },
+      ]
+    },
+    options: { responsive: true, interaction: { mode: "index", intersect: false },
+      scales: { y: { beginAtZero: true } }, plugins: { legend: { position: "bottom" } } }
+  });
+})();
+</script>
+{% endblock %}

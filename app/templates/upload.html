@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Upload TSV — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Upload a gather file</h1><div class="sub">Generate and store a report from an existing collection</div></div></div>
+
+{% if not docker.daemon_running %}
+<div class="alert warn"><span>⚠</span> Docker is not running — the upload will queue but won't generate until Docker is up.</div>
+{% endif %}
+
+<form class="card" method="post" action="/reports" enctype="multipart/form-data" id="upload-form">
+  <p class="muted">Already collected an <code>out.tsv</code> (or <code>.tsv.gz</code>) elsewhere? Drop it here to generate and store the report.</p>
+  <label class="dropzone" id="dropzone" for="file-input">
+    <div class="dz-ic">⬆</div>
+    <div><strong>Drag &amp; drop</strong> your gather file here</div>
+    <div class="muted small">or click to browse · .tsv / .txt / .gz</div>
+    <div class="dz-file" id="dz-file"></div>
+    <input type="file" name="file" id="file-input" accept=".tsv,.txt,.gz" required hidden>
+  </label>
+  <div class="actions" style="margin-top:18px">
+    <button class="btn primary" type="submit" id="upload-btn">Upload &amp; generate</button>
+    <a class="btn ghost" href="/reports">Cancel</a>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}<script>setupDropzone();</script>{% endblock %}

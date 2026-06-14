@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Connections — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Connections</h1><div class="sub">Saved PostgreSQL targets for collection</div></div>
+</div>
+
+{% if not docker.daemon_running %}
+<div class="alert warn"><span>⚠</span> Docker is not running — testing and collecting are disabled until you start Docker.</div>
+{% endif %}
+
+<div class="cardgrid">
+  <a class="card add-card" href="/connections/new">
+    <div><div class="plus">＋</div>New connection</div>
+  </a>
+  {% for c in connections %}
+  <div class="card conn-card reveal">
+    <div class="rc-top">
+      <div class="cc-name">{{ c.name }}</div>
+      <span class="chip">{{ c.sslmode }}</span>
+    </div>
+    <div class="cc-target mono">{{ c.host }}:{{ c.port }}/{{ c.dbname }}</div>
+    <div class="rc-meta">
+      <span>user <b>{{ c.username }}</b></span>
+      {% if c.last_used_at %}<span>used {{ c.last_used_at | relative_time }}</span>{% endif %}
+    </div>
+    <div class="cc-actions">
+      <button class="icon-btn test-btn" data-cid="{{ c.id }}" data-name="{{ c.name }}" title="Test connection">▶</button>
+      <form method="post" action="/connections/{{ c.id }}/collect" title="Collect full snapshot now">
+        <button class="icon-btn" type="submit" {% if not docker.daemon_running %}disabled{% endif %}>↓</button>
+      </form>
+      {% set sched = schedules.get(c.id) %}
+      {% if sched and sched.enabled %}
+      <form method="post" action="/connections/{{ c.id }}/schedule" title="Continuous monitoring active (every {{ sched.interval_sec }}s). Click to pause">
+        <input type="hidden" name="action" value="disable">
+        <button class="icon-btn" type="submit" style="color:var(--green)">⏱</button>
+      </form>
+      {% else %}
+      <form method="post" action="/connections/{{ c.id }}/schedule" title="Enable continuous monitoring (every 60s)">
+        <input type="hidden" name="action" value="enable">
+        <input type="hidden" name="interval" value="60">
+        <button class="icon-btn" type="submit" {% if not docker.daemon_running %}disabled{% endif %}>⏱</button>
+      </form>
+      {% endif %}
+      <a class="icon-btn" href="/connections/{{ c.id }}/edit" title="Edit">✎</a>
+      <form method="post" action="/connections/{{ c.id }}/delete" onsubmit="return confirm('Delete connection {{ c.name }}?')" title="Delete">
+        <button class="icon-btn danger" type="submit">🗑</button>
+      </form>
+    </div>
+    {% if sched and sched.enabled %}
+    <div class="muted small" style="margin-top:4px">⏱ Monitoring every {{ sched.interval_sec }}s {% if sched.last_run_at %}· last: {{ sched.last_run_at | relative_time }}{% endif %}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}<script>revealOnScroll();</script>{% endblock %}

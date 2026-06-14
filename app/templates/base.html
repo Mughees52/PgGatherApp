@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PgGatherApp{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="dot">pg</span>gather<span>·</span></div>
+      <nav>
+        <a href="/reports" class="{{ 'active' if nav=='library' }}"><span class="ic">▦</span> Library</a>
+        <a href="/connections" class="{{ 'active' if nav=='connections' }}"><span class="ic">⛁</span> Connections</a>
+        <a href="/compare" class="{{ 'active' if nav=='compare' }}"><span class="ic">⇄</span> Compare</a>
+        <a href="/timeline" class="{{ 'active' if nav=='timeline' }}"><span class="ic">📈</span> Timeline</a>
+        <a href="/reports/upload" class="{{ 'active' if nav=='upload' }}"><span class="ic">↑</span> Upload TSV</a>
+      </nav>
+      <div class="foot">
+        {% if docker is defined %}
+        <div class="pill {{ 'ok' if docker.daemon_running else 'bad' }}">
+          <span class="led"></span>{{ 'Docker ready' if docker.daemon_running else 'Docker offline' }}
+        </div>
+        {% endif %}
+        <div>PgGatherApp · engine v{{ engine_ver }}</div>
+      </div>
+    </aside>
+
+    <div class="content">
+      <div class="topbar-mobile">
+        <button class="burger" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <strong>PgGatherApp</strong>
+      </div>
+      <main class="container">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  <div id="toasts"></div>
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

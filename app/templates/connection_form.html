@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit" if conn else "New" }} connection — PgGatherApp{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{{ "Edit" if conn else "New" }} connection</h1></div>
+
+<form class="card form" method="post"
+      action="{{ '/connections/' ~ conn.id ~ '/edit' if conn else '/connections' }}">
+  <label>Name
+    <input name="name" required value="{{ conn.name if conn else '' }}" placeholder="prod-primary">
+  </label>
+  <div class="grid-2">
+    <label>Host
+      <input name="host" required value="{{ conn.host if conn else 'localhost' }}">
+    </label>
+    <label>Port
+      <input name="port" type="number" value="{{ conn.port if conn else 5432 }}">
+    </label>
+  </div>
+  <div class="grid-2">
+    <label>Database
+      <input name="dbname" required value="{{ conn.dbname if conn else 'postgres' }}">
+    </label>
+    <label>User
+      <input name="username" required value="{{ conn.username if conn else 'postgres' }}">
+    </label>
+  </div>
+  <div class="grid-2">
+    <label>Password
+      <input name="password" type="password" autocomplete="new-password"
+             placeholder="{{ 'leave blank to keep current' if conn else '' }}">
+    </label>
+    <label>SSL mode
+      <select name="sslmode">
+        {% set cur = conn.sslmode if conn else 'prefer' %}
+        {% for m in ["disable","allow","prefer","require","verify-ca","verify-full"] %}
+        <option value="{{ m }}" {% if cur==m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <p class="muted small">The password is encrypted at rest and only used to run the collection.</p>
+  <div class="actions">
+    <button class="btn primary" type="submit">Save</button>
+    <a class="btn ghost" href="/connections">Cancel</a>
+  </div>
+</form>
+{% endblock %}
