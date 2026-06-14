@@ -321,6 +321,8 @@ SELECT coalesce(json_agg(t ORDER BY t.cnt DESC), '[]') FROM (
 SELECT coalesce(json_agg(t ORDER BY t.total_time DESC), '[]') FROM (
   SELECT left(query, 1000) AS query, calls, round(total_time::numeric, 2) AS total_time,
     CASE WHEN calls > 0 THEN round((total_time / calls)::numeric, 2) END AS avg_time_ms,
+    shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written,
+    temp_blks_read, temp_blks_written,
     CASE WHEN calls > 0 THEN round((shared_blks_read::numeric / calls), 1) END AS avg_reads,
     CASE WHEN (shared_blks_hit + shared_blks_read) > 0
          THEN round((shared_blks_hit * 100.0 / (shared_blks_hit + shared_blks_read))::numeric, 1) END AS cache_hit_pct,
@@ -331,7 +333,7 @@ SELECT coalesce(json_agg(t ORDER BY t.total_time DESC), '[]') FROM (
   FROM pg_get_statements
   WHERE total_time > 0
   ORDER BY total_time DESC
-  LIMIT 30
+  LIMIT 50
 ) t
 """)
 
