@@ -139,78 +139,156 @@ The timer button turns green when active. Click again to pause.
 
 ### 8. AI integration (MCP)
 
-PgGatherApp includes a built-in [MCP](https://modelcontextprotocol.io/) server that exposes report data to AI assistants.
+PgGatherApp includes a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI assistants like Claude read your report data and provide expert-level PostgreSQL analysis in natural language.
+
+#### Why use this?
+
+Instead of reading the dashboard yourself and interpreting findings, you ask the AI in plain English:
+
+- *"What are the top issues in my database?"* — the AI reads all 140+ findings and explains what matters
+- *"Recommend parameter changes for my 16-core 64GB server"* — hardware-aware tuning suggestions
+- *"Compare last week's snapshot with today"* — explains what got worse and why
+- *"Which tables need urgent attention?"* — prioritized action items
+
+The AI has structured access to every finding, every table's bloat status, every session's query, every parameter value — not screenshots, but real data it can reason about.
 
 #### Setup with Claude Desktop
 
-Add to `~/.claude/claude_desktop_config.json`:
+**Step 1**: Find your Python path and project path:
+
+```bash
+# From the PgGatherApp directory:
+echo "Python: $(pwd)/.venv/bin/python"
+echo "Script: $(pwd)/mcp_stdio.py"
+```
+
+**Step 2**: Open Claude Desktop settings:
+- Click **Claude** in the macOS menu bar (top of screen, not inside the app window)
+- Click **Settings...**
+- Go to the **Developer** tab
+- Click **Edit Config**
+
+This opens `~/Library/Application Support/Claude/claude_desktop_config.json`.
+
+**Step 3**: Add the pggather server to `mcpServers` (replace paths with your actual paths):
 
 ```json
 {
   "mcpServers": {
     "pggather": {
-      "type": "streamable-http",
-      "url": "http://localhost:8000/mcp/mcp"
+      "command": "/path/to/PgGatherApp/.venv/bin/python",
+      "args": ["/path/to/PgGatherApp/mcp_stdio.py"]
     }
   }
 }
 ```
 
-#### What the AI can access
-
-**Resources** (read-only data):
-
-| URI | Description |
-|-----|-------------|
-| `pggather://servers` | All servers with report counts |
-| `pggather://report/{id}/summary` | Key metrics and server info |
-| `pggather://report/{id}/findings` | Diagnostic findings with severity |
-| `pggather://report/{id}/params` | All PostgreSQL parameters |
-| `pggather://report/{id}/tables` | Table health data |
-| `pggather://report/{id}/indexes` | Index health data |
-| `pggather://report/{id}/sessions` | Session details |
-| `pggather://report/{id}/statements` | Top SQL statements |
-| `pggather://report/{id}/bgwriter` | Checkpoint stats |
-| `pggather://report/{id}/recommendations` | Tuning suggestions |
-| `pggather://timeline/{server_key}` | Monitoring time-series |
-
-**Tools** (actions):
-
-| Tool | Description |
-|------|-------------|
-| `list_reports` | Find reports by server or status |
-| `get_report_summary` | Complete diagnostic summary |
-| `get_findings` | Findings grouped by severity |
-| `get_parameter_recommendations` | Hardware-aware tuning with CPU/RAM/storage inputs |
-| `compare_reports` | Diff two snapshots |
-
-#### Pair with postgres-mcp for live analysis
-
-For the most powerful setup, add [postgres-mcp](https://github.com/crystaldba/postgres-mcp) alongside:
+For example, if you cloned the repo to your home directory:
 
 ```json
 {
   "mcpServers": {
     "pggather": {
-      "type": "streamable-http",
-      "url": "http://localhost:8000/mcp/mcp"
+      "command": "/Users/yourname/PgGatherApp/.venv/bin/python",
+      "args": ["/Users/yourname/PgGatherApp/mcp_stdio.py"]
+    }
+  }
+}
+```
+
+**Step 4**: **Quit Claude Desktop completely** (Cmd+Q) and reopen it.
+
+**Step 5**: Verify the connection. In a new chat, look at the **bottom-right corner of the text input box** — you should see a small slider/toggle icon. Click it to see the pggather tools listed:
+- `list_reports`
+- `get_report_summary`
+- `get_findings`
+- `get_parameter_recommendations`
+- `compare_reports`
+
+If the icon doesn't appear, check the logs:
+```bash
+tail -20 ~/Library/Logs/Claude/mcp*.log
+```
+
+**Step 6**: Start using it. Ask Claude:
+
+```
+Use pggather to list my PostgreSQL reports
+```
+
+Once it calls the tool and sees your data, you can ask follow-up questions naturally:
+- "Show me the findings for that report"
+- "What parameter changes would you recommend for a 32GB OLTP server?"
+- "Compare those two reports and explain the differences"
+
+#### What the AI can do
+
+| Tool | What it does | Example prompt |
+|------|-------------|----------------|
+| `list_reports` | Lists all stored reports with server info | "What reports do I have?" |
+| `get_report_summary` | Full diagnostic summary with metrics and findings | "Summarize the health of my prod database" |
+| `get_findings` | All findings grouped by severity (critical/warning/info) | "What's wrong with my database?" |
+| `get_parameter_recommendations` | Tuning suggestions based on CPU/RAM/storage/workload | "Recommend params for 16 cores, 64GB, SSD, OLTP" |
+| `compare_reports` | Diff two snapshots showing metric and config changes | "What changed between these two snapshots?" |
+
+The AI also has access to **resources** — structured data it can read directly:
+
+| Resource | Content |
+|----------|---------|
+| `pggather://servers` | All servers with report counts |
+| `pggather://report/{id}/tables` | Table health (bloat, dead tuples, cache hit, age) |
+| `pggather://report/{id}/indexes` | Index health (scans, unused, invalid) |
+| `pggather://report/{id}/sessions` | Session details (queries, wait events, blockers) |
+| `pggather://report/{id}/statements` | Top SQL statements by execution time |
+| `pggather://report/{id}/params` | All PostgreSQL parameters |
+| `pggather://report/{id}/bgwriter` | Checkpoint and BGWriter statistics |
+| `pggather://timeline/{server_key}` | Monitoring time-series from continuous collection |
+
+#### Optional: Pair with postgres-mcp for live database access
+
+For the most powerful setup, add [postgres-mcp](https://github.com/crystaldba/postgres-mcp) alongside PgGatherApp. This gives the AI both **historical snapshots** (from pg_gather) and **live database access** (from postgres-mcp).
+
+Install postgres-mcp:
+```bash
+pip install postgres-mcp
+# or: brew install uv && uvx postgres-mcp
+```
+
+Add both servers to your Claude Desktop config:
+```json
+{
+  "mcpServers": {
+    "pggather": {
+      "command": "/path/to/PgGatherApp/.venv/bin/python",
+      "args": ["/path/to/PgGatherApp/mcp_stdio.py"]
     },
     "postgres": {
       "command": "uvx",
       "args": ["postgres-mcp", "--access-mode=restricted"],
-      "env": {"DATABASE_URI": "postgresql://user:pass@host:5432/dbname"}
+      "env": {
+        "DATABASE_URI": "postgresql://user:password@host:5432/dbname"
+      }
     }
   }
 }
 ```
 
-Now the AI has both the **pg_gather snapshot analysis** and **live database access** — it can cross-reference historical findings with current state and give expert recommendations.
+Now you can ask things like:
+- *"My pg_gather report shows high bloat on the orders table. Can you check the current state and recommend a fix?"*
+- *"Run EXPLAIN on the slowest query from my report"*
+- *"The report shows unused indexes — verify they're still unused and give me DROP statements"*
 
-Example prompts:
-- "What are the top issues in my latest PostgreSQL report?"
-- "Compare the last two snapshots and explain what got worse"
-- "Recommend parameter changes for my 16-core, 64GB RAM server running OLTP"
-- "Which tables need the most urgent attention?"
+The AI cross-references the historical pg_gather snapshot with live database state to give accurate, actionable advice.
+
+#### Troubleshooting MCP
+
+| Problem | Solution |
+|---------|----------|
+| No slider icon in Claude Desktop | Quit completely (Cmd+Q) and reopen. Check `~/Library/Logs/Claude/mcp.log` for errors |
+| "not valid MCP server configuration" | Make sure you're using `command`/`args` format (stdio), not `type`/`url` (streamable-http). Claude Desktop only supports stdio |
+| Server starts but tools don't work | Check `~/Library/Logs/Claude/mcp-server-pggather.log` for Python errors |
+| "No module named app" | The `mcp_stdio.py` script must be run from the project directory. Use absolute paths in the config |
+| Reports not showing | Make sure you've uploaded or collected at least one report via the web UI first (http://localhost:8000) |
 
 ## Architecture
 
