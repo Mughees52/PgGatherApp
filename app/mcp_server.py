@@ -785,3 +785,50 @@ def get_activity(report_id: str) -> str:
         } if longest_active else None,
         "sessions": session_list,
     }, indent=2)
+
+
+@mcp.tool()
+def get_locks(report_id: str) -> str:
+    """Get lock information showing which processes hold locks on which relations.
+
+    Useful for diagnosing blocking, deadlocks, and lock contention.
+    """
+    detail, r, err = _get_detail(report_id)
+    if err:
+        return json.dumps({"error": err})
+    locks = detail.get("locks") or []
+    if not locks:
+        return json.dumps({"note": "No lock data in this capture.", "locks": []})
+    return json.dumps({"count": len(locks), "locks": locks}, indent=2)
+
+
+@mcp.tool()
+def get_wal_stats(report_id: str) -> str:
+    """Get WAL (Write-Ahead Log) statistics.
+
+    Shows WAL generation rate, full page images, buffer usage, and
+    write/sync times. Essential for replication and I/O analysis.
+    """
+    detail, r, err = _get_detail(report_id)
+    if err:
+        return json.dumps({"error": err})
+    wal = detail.get("wal_stats")
+    if not wal:
+        return json.dumps({"note": "No WAL stats in this capture (may require pg_stat_wal view)."})
+    return json.dumps(wal, indent=2)
+
+
+@mcp.tool()
+def get_archiver_stats(report_id: str) -> str:
+    """Get WAL archiver statistics.
+
+    Shows archive success/failure counts, last archived/failed WAL names
+    and timestamps. Critical for monitoring backup and PITR readiness.
+    """
+    detail, r, err = _get_detail(report_id)
+    if err:
+        return json.dumps({"error": err})
+    arch = detail.get("archiver_stats")
+    if not arch:
+        return json.dumps({"note": "No archiver stats in this capture."})
+    return json.dumps(arch, indent=2)

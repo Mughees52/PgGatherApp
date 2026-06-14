@@ -287,15 +287,17 @@ SELECT coalesce(json_agg(t ORDER BY t.size DESC NULLS LAST), '[]') FROM (
 ) t
 """)
 
-    # --- Sessions ---
+    # --- Sessions (expanded: datid, usesysid, query_id, backend_xid, client details) ---
     _q("sessions", """
 SELECT coalesce(json_agg(t ORDER BY t.state, t.backend_start), '[]') FROM (
-  SELECT a.pid, a.state, a.backend_type, a.wait_event_type, a.wait_event,
-    left(a.query, 1000) AS query,
-    a.client_addr::text, a.application_name,
+  SELECT a.pid, a.datid, a.usesysid, a.state, a.backend_type,
+    a.wait_event_type, a.wait_event,
+    left(a.query, 1000) AS query, a.query_id,
+    a.client_addr::text, a.client_hostname, a.client_port,
+    a.application_name,
     a.backend_start, a.xact_start, a.query_start, a.state_change,
-    age(a.backend_xmin)::text AS xmin_age,
-    a.ssl, a.sslversion,
+    a.backend_xid::text, age(a.backend_xmin)::text AS xmin_age,
+    a.ssl, a.sslversion, a.sslcipher,
     a.leader_pid,
     (SELECT array_agg(b.blocking_pids) FROM pg_get_pidblock b WHERE b.victim_pid = a.pid) AS blocked_by
   FROM pg_get_activity a
@@ -319,7 +321,8 @@ SELECT coalesce(json_agg(t ORDER BY t.cnt DESC), '[]') FROM (
     # --- Top statements ---
     _q("statements", """
 SELECT coalesce(json_agg(t ORDER BY t.total_time DESC), '[]') FROM (
-  SELECT left(query, 1000) AS query, calls, round(total_time::numeric, 2) AS total_time,
+  SELECT userid, dbid, left(query, 1000) AS query,
+    calls, round(total_time::numeric, 2) AS total_time,
     CASE WHEN calls > 0 THEN round((total_time / calls)::numeric, 2) END AS avg_time_ms,
     shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written,
     temp_blks_read, temp_blks_written,
@@ -340,9 +343,10 @@ SELECT coalesce(json_agg(t ORDER BY t.total_time DESC), '[]') FROM (
     # --- Databases ---
     _q("databases", """
 SELECT coalesce(json_agg(t ORDER BY t.db_size DESC NULLS LAST), '[]') FROM (
-  SELECT datname, encod, colat, db_size, age, mxidage,
+  SELECT datid, datname, encod, colat, db_size, age, mxidage,
     xact_commit, xact_rollback,
-    tup_inserted, tup_updated, tup_deleted,
+    tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
+    deadlocks, blk_read_time, blk_write_time,
     CASE WHEN blks_fetch > 0
          THEN round((blks_hit * 100.0 / blks_fetch)::numeric, 1) END AS cache_hit_pct,
     temp_files, temp_bytes,
@@ -392,8 +396,8 @@ SELECT row_to_json(t) FROM (
     END AS forced_pct,
     round(checkpoint_write_time::numeric / 1000, 1) AS write_time_s,
     round(checkpoint_sync_time::numeric / 1000, 1) AS sync_time_s,
-    buffers_checkpoint, buffers_clean, buffers_backend, buffers_alloc,
-    maxwritten_clean,
+    buffers_checkpoint, buffers_clean, buffers_backend, buffers_backend_fsync,
+    buffers_alloc, maxwritten_clean,
     CASE WHEN (checkpoints_timed + checkpoints_req) > 0
          THEN round((
            extract(epoch FROM (g.collect_ts - b.stats_reset))
@@ -537,6 +541,54 @@ SELECT coalesce(json_agg(t ORDER BY t.name), '[]') FROM (
     (SELECT json_agg(json_build_object('file', f.sourcefile, 'setting', f.setting, 'applied', f.applied, 'error', f.error))
      FROM pg_get_file_confs f WHERE f.name = c.name) AS file_confs
   FROM pg_get_confs c
+) t
+""")
+
+    # --- Locks (pid -> relation mapping) ---
+    _q("locks", """
+SELECT coalesce(json_agg(t), '[]') FROM (
+  SELECT l.pid, l.relation, c.relname,
+    a.state, a.wait_event_type, a.wait_event,
+    left(a.query, 500) AS query
+  FROM pg_get_locks l
+  LEFT JOIN pg_get_class c ON c.reloid = l.relation
+  LEFT JOIN pg_get_activity a ON a.pid = l.pid
+) t
+""")
+
+    # --- WAL statistics ---
+    _q("wal_stats", """
+SELECT row_to_json(t) FROM (
+  SELECT wal_records, wal_fpi, wal_bytes::text AS wal_bytes,
+    wal_buffers_full, wal_write, wal_sync,
+    round(wal_write_time::numeric, 2) AS wal_write_time,
+    round(wal_sync_time::numeric, 2) AS wal_sync_time,
+    stats_reset
+  FROM pg_get_wal
+) t
+""")
+
+    # --- Archiver statistics ---
+    _q("archiver_stats", """
+SELECT row_to_json(t) FROM (
+  SELECT archived_count, last_archived_wal, last_archived_time,
+    last_failed_wal, last_failed_time
+  FROM pg_archiver_stat
+) t
+""")
+
+    # --- Shared memory allocations ---
+    _q("shmem", """
+SELECT coalesce(json_agg(t ORDER BY t.allocated_size DESC), '[]') FROM (
+  SELECT name, allocated_size FROM pg_get_shmem
+  WHERE allocated_size > 0
+) t
+""")
+
+    # --- Prepared transactions ---
+    _q("prepared_xacts", """
+SELECT coalesce(json_agg(t ORDER BY t.prepared), '[]') FROM (
+  SELECT txn::text, gid, prepared FROM pg_get_prep_xacts
 ) t
 """)
 
