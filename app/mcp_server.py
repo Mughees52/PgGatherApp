@@ -252,6 +252,69 @@ def get_report_summary(report_id: str) -> str:
 
 
 @mcp.tool()
+def get_report_detail(report_id: str, section: str = "all") -> str:
+    """Get detailed section data from a report.
+
+    Args:
+        report_id: The report ID
+        section: Which section to return. Options:
+            'tables' - Table health (bloat, dead tuples, cache hit, DML rates, recommendations)
+            'indexes' - Index health (scans, size, unused, invalid)
+            'sessions' - Session details (PID, state, query text, wait events, blockers)
+            'statements' - Top SQL statements (query text, execution time, calls, cache hit, I/O)
+            'wait_events' - Wait event breakdown with categories
+            'databases' - Per-database stats (size, cache hit, age, DML rates)
+            'bgwriter' - Checkpoint and BGWriter statistics
+            'replication' - Replication lag and slot status
+            'hba' - HBA rules with method warnings and shadow detection
+            'extensions' - Installed extensions
+            'roles' - User/role details with connection counts
+            'connections_by_db' - Connections per database (active, idle, SSL)
+            'io_stats' - IO statistics per backend type
+            'head_info' - Server info (version, uptime, WAL position)
+            'all' - Returns all sections (large response)
+    """
+    r, err = _report_or_error(report_id)
+    if err:
+        return json.dumps({"error": err})
+    detail = _load_json(r["detail_json"])
+    if not detail:
+        return json.dumps({"error": "No detail data available for this report. "
+                           "The report may need to be regenerated."})
+    obj = _load_json(r["report_json"]) or {}
+    days = max(float(report_view._int(
+        report_view._f(report_view._f(obj, "dbts", {}), "f4", 1))), 1.0)
+
+    if section == "all":
+        view = report_view.build_detail_view(detail, obj=obj)
+        return json.dumps(view, indent=2, default=str)
+
+    section_map = {
+        "tables": lambda: report_view.detail_tables(detail, days=days),
+        "indexes": lambda: report_view.detail_indexes(detail),
+        "sessions": lambda: report_view.detail_sessions(detail),
+        "statements": lambda: report_view.detail_statements(detail),
+        "wait_events": lambda: report_view.detail_wait_events(detail),
+        "databases": lambda: report_view.detail_databases(detail, days=days),
+        "bgwriter": lambda: report_view.detail_bgwriter(detail),
+        "replication": lambda: report_view.detail_replication(detail),
+        "hba": lambda: report_view.detail_hba(detail),
+        "extensions": lambda: report_view.detail_extensions(detail),
+        "roles": lambda: report_view.detail_roles(detail),
+        "connections_by_db": lambda: report_view.detail_connections_by_db(detail),
+        "io_stats": lambda: report_view.detail_io_stats(detail),
+        "head_info": lambda: report_view.detail_head_info(detail),
+    }
+
+    if section not in section_map:
+        return json.dumps({"error": f"Unknown section '{section}'. "
+                           f"Available: {', '.join(section_map.keys())}"})
+
+    data = section_map[section]()
+    return json.dumps(data, indent=2, default=str)
+
+
+@mcp.tool()
 def get_findings(report_id: str) -> str:
     """Get diagnostic findings for a report, grouped by severity."""
     r, err = _report_or_error(report_id)
